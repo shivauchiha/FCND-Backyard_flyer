@@ -1,7 +1,7 @@
 import argparse
 import time
 from enum import Enum
-
+import math
 import numpy as np
 
 from udacidrone import Drone
@@ -41,15 +41,28 @@ class BackyardFlyer(Drone):
 
         This triggers when `MsgID.LOCAL_POSITION` is received and self.local_position contains new data
         """
-        pass
+        
+        if self.flight_state == States.TAKEOFF and (-1.0*self.local_position[2]) > 2.7:
+            print("detected Takeoff")
+            
+            self.all_waypoints = self.calculate_box()
+            self.waypoint_transition()
+        elif self.flight_state == States.WAYPOINT:
+            if (np.sqrt(np.sum(np.array(self.target_position[0:2])-np.array(self.local_position[0:2])))<0.1):
+                if len(self.all_waypoints) >0:
+                    self.waypoint_transition()
+                else :
+                    if (self.local_velocity[0]<0.1 and self.local_velocity[1]<0.1):
+                        self.landing_transition()
+        
+
+
 
     def velocity_callback(self):
-        """
-        TODO: Implement this method
-
-        This triggers when `MsgID.LOCAL_VELOCITY` is received and self.local_velocity contains new data
-        """
-        pass
+        if self.flight_state == States.LANDING:
+            if self.global_position[2]-self.global_home[2]<0.1:
+                if abs(self.local_position[2])<0.01:
+                    self.disarming_transition()
 
     def state_callback(self):
         """
@@ -57,14 +70,25 @@ class BackyardFlyer(Drone):
 
         This triggers when `MsgID.STATE` is received and self.armed and self.guided contain new data
         """
-        pass
+        if self.in_mission:
+            if self.flight_state == States.MANUAL:
+                self.arming_transition()
+            elif self.flight_state == States.ARMING:
+                if self.armed:
+                    self.takeoff_transition()
+            elif self.flight_state == States.DISARMING:
+                if ~self.armed and ~self.guided:
+                    self.manual_transition()
+            
+
+
 
     def calculate_box(self):
         """TODO: Fill out this method
         
         1. Return waypoints to fly a box
         """
-        pass
+        return [(10,0,5,0),(10,10,5,0),(0,10,5,0),(0,0,5,0)]
 
     def arming_transition(self):
         """TODO: Fill out this method
@@ -74,6 +98,10 @@ class BackyardFlyer(Drone):
         3. Set the home location to current position
         4. Transition to the ARMING state
         """
+        self.take_control()
+        self.arm()
+        self.set_home_position(self.global_position[0],self.global_position[1],self.global_position[2])
+        self.flight_state = States.ARMING
         print("arming transition")
 
     def takeoff_transition(self):
@@ -83,6 +111,11 @@ class BackyardFlyer(Drone):
         2. Command a takeoff to 3.0m
         3. Transition to the TAKEOFF state
         """
+        target_altitude = 3.0
+        self.target_position[2] = target_altitude
+        self.takeoff(target_altitude)
+        self.flight_state = States.TAKEOFF
+
         print("takeoff transition")
 
     def waypoint_transition(self):
@@ -91,6 +124,9 @@ class BackyardFlyer(Drone):
         1. Command the next waypoint position
         2. Transition to WAYPOINT state
         """
+        self.target_position=self.all_waypoints.pop(0)
+        self.cmd_position(self.target_position[0],self.target_position[1],self.target_position[2],0.0)
+        self.flight_state = States.WAYPOINT
         print("waypoint transition")
 
     def landing_transition(self):
@@ -99,6 +135,10 @@ class BackyardFlyer(Drone):
         1. Command the drone to land
         2. Transition to the LANDING state
         """
+        self.land()
+        self.flight_state = States.LANDING
+
+
         print("landing transition")
 
     def disarming_transition(self):
@@ -107,6 +147,8 @@ class BackyardFlyer(Drone):
         1. Command the drone to disarm
         2. Transition to the DISARMING state
         """
+        self.disarm()
+        self.flight_state = States.DISARMING
         print("disarm transition")
 
     def manual_transition(self):
